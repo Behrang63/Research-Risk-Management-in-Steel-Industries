@@ -1,0 +1,6 @@
+services:
+  researchriskmanagementinsteelindustries:
+    image: researchriskmanagementinsteelindustries
+    build:
+      context: .
+      dockerfile: ./Dockerfile

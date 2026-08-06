@@ -1,9 +1,10 @@
 import os
 import json
 import re
+import time
 from typing import Dict, Any, List
 
-# وارد کردن ایمن موتور بازیابی معنایی (Semantic RAG) با گارد مسیردهی مطلق
+# وارد کردن ایمن موتور بازیابی معنایی (Semantic RAG)
 try:
     from agents.rag_retriever import SemanticRagRetriever
 except ImportError:
@@ -15,25 +16,24 @@ except ImportError:
 try:
     import ollama
 except ImportError:
-    ollama = None  # مدیریت عدم وجود کتابخانه در محیط‌های ایزوله
+    ollama = None
 
 
 class ProposalAnalyzerAgent:
     """
-    عامل هوشمند ارزیابی پروپوزال با معماری تزریق شواهد قطعی (Evidence Injection)،
-    پشتیبانی از لایه بازیابی معنایی (Semantic RAG) و حلقه بازخورد اصلاح خودکار.
+    عامل هوشمند ارزیابی پروپوزال با پارسر مقاوم در برابر خطاهای JSON
     """
 
     def __init__(self, 
-                 model_name: str = "llama3:latest",
+                 model_name: str = "llama3.2",
                  drivers_path: str = "config/drivers.json",
                  skills_dir: str = "skills"):
+        self.model_name = model_name
         
         self.model_name = model_name
         self.drivers_path = drivers_path
         self.skills_dir = skills_dir
         
-        # حل پویا و ایمن مسیر فایل پیشران‌ها جهت هماهنگی با Streamlit
         current_dir = os.path.dirname(os.path.abspath(__file__))
         project_root = os.path.dirname(current_dir)
         
@@ -55,180 +55,164 @@ class ProposalAnalyzerAgent:
         self.skill_trl = self._load_file(os.path.join(self.skills_dir, "SKILL_TRL_EVAL.md"))
         self.skill_critique = self._load_file(os.path.join(self.skills_dir, "SKILL_PROPOSAL_CRITIQUE.md"))
 
-        # نمونه‌سازی موتور بازیابی معنایی با شرایط بهینه محاسباتی
         if SemanticRagRetriever is not None:
             self.retriever = SemanticRagRetriever(threshold=0.15, max_evidence_count=8)
         else:
             self.retriever = None
 
     def _load_json(self, path: str) -> Dict[str, Any]:
-        """بارگذاری فایل JSON کانفیگ پیشران‌ها"""
         if not os.path.exists(path):
             return {"strategic_drivers": []}
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
 
     def _load_file(self, path: str) -> str:
-        """بارگذاری متن فایل‌های مهارتی"""
         if not os.path.exists(path):
             return f"# Warning: Skill file {path} not found."
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
 
     def _extract_evidence_sentences(self, proposal_text: str) -> List[str]:
-        """
-        تغییر معماری: استفاده از موتور RAG معنایی پایتون به جای جستجوی کاراکتری سنتی
-        جهت استخراج عمیق‌ترین همبستگی‌ها و مسدودسازی تنبلی (Model Laziness).
-        """
         if self.retriever is not None:
             return self.retriever.retrieve_evidence(
                 proposal_text=proposal_text,
                 strategic_drivers=self.drivers_data.get("strategic_drivers", [])
             )
-        
-        # مکانیزم لایه دفاعی پایتون (Fallback) در صورت عدم لود ماژول RAG
         sentences = re.split(r'[.!?\n]', proposal_text)
         return [s.strip() for s in sentences if len(s.strip()) > 25][:8]
 
     def _build_system_prompt(self, evidence_bank: List[str], previous_feedback: str = None) -> str:
-        """
-        ساخت پرامپت سیستمی تدافعی به همراه اعمال اهرم جریمه روانی (Loss Aversion) در چرخه‌های تکرار
-        """
         drivers_summary = json.dumps(self.drivers_data.get("strategic_drivers", []), ensure_ascii=False, indent=2)
-        
-        # قالب‌بندی شواهد برداری‌شده جهت انتقال به کانتکست مدل زبانی
         evidence_str = "\n".join([f"{i+1}. {ev}" for i, ev in enumerate(evidence_bank)])
         if not evidence_str:
-            evidence_str = "هیچ شاهد مستقیمی دارای همبستگی معنایی با پیشران‌های استراتژیک در متن یافت نشد."
+            evidence_str = "هیچ شاهد مستقیمی در متن یافت نشد."
 
         feedback_section = ""
         if previous_feedback:
             feedback_section = f"""
 \n🚨 [اخطار سیستم ممیزی - تلاش مجدد]:
-در اجرای قبلی، خروجی شما به دلیل خطای زیر توسط سیستم کنترل کیفیت (QA) رد شد:
+در اجرای قبلی، خروجی شما به دلیل خطای زیر رد شد:
 "{previous_feedback}"
-شما موظف هستید این خطا را در این تلاش کاملاً برطرف کنید. تولید فیلد استنادی خالی، نامعتبر یا عدم استفاده از شناسه‌های بخش ۱ مساوی با شکست سیستم است!
+حتماً خروجی را فقط در قالب JSON معتبر و بدون هیچ متن اضافه‌ای تولید کنید!
 """
         
-        system_prompt = f"""
-شما «عامل ارزیابی و غربالگری هوشمند پروپوزال‌های تافکو» هستید.{feedback_section}
-وظیفه شما تحلیل دقیق فنی پروپوزال‌های R&D و تطبیق آن‌ها با پیشران‌های استراتژیک است.
-
----
-### ۱. پایگاه دانش پیشران‌های استراتژیک تافکو:
+        return f"""
+شما «عامل ارزیابی پروپوزال‌های تافکو» هستید.{feedback_section}
+پایگاه دانش پیشران‌ها:
 {drivers_summary}
 
----
-### ۲. فایل‌های مهارتی شما:
-[مهارت ۱: واژگان تخصصی متالورژی]
-{self.skill_terminology}
-
-[مهارت ۲: سنجش و اصلاح TRL]
-{self.skill_trl}
-
-[مهارت ۳: نقد فنی و شناسایی نقاط ضعف]
-{self.skill_critique}
-
----
-### ۳. بانک شواهد استخراج‌شده معنایی (Evidence Bank) - قانون قطعی:
-جملات زیر توسط موتور بازیابی معنایی (RAG) از متن پروپوزال استخراج شده‌اند. 
-شما **فقط و حداقل** مجاز هستید فیلد `reasoning_quote` را با کپی کردن دقیق یکی از جملات زیر پر کنید:
-
+بانک شواهد (کپی کلمه‌به‌کلمه برای reasoning_quote):
 {evidence_str}
 
----
-### ۴. دستورالعمل خروجی (خط قرمز بسیار مهم):
-- خروجی فقط و فقط فرمت JSON معتبر باشد.
-- اگر برای پیشرانی در "بانک شواهد" جمله‌ای نیافتید، آن پیشران را کلاً از آرایه خروجی حذف کنید.
-- قانون طلایی شناسه‌ها (خط قرمز مطلق): فیلد `driver_id` در بخش `strategic_alignment` باید دقیقاً معادل فیلد `id` پیشران استراتژیک مرتبط در بخش ۱ باشد (مانند DRV_ENERGY_01). به هیچ عنوان عنوان پروپوزال، عنوان طرح، یا هیچ رشته دیگری به جز شناسه رسمی پیشران را در این فیلد قرار ندهید.
-- فیلد `driver_title` باید دقیقاً معادل فیلد `title` همان پیشران در بخش ۱ باشد.
+قانون مطلق: خروجی فقط و فقط یک JSON معتبر باشد.
 
-ساختار دقیق JSON خروجی باید به شکل زیر باشد:
+ساختار JSON:
 {{
   "proposal_summary": {{
-    "title": "عنوان استخراج‌شده یا پیشنهادی طرح",
-    "executive_summary": "خلاصه مدیریتی طرح در ۳ سطر کامل"
+    "title": "عنوان طرح",
+    "executive_summary": "خلاصه مدیریتی"
   }},
   "strategic_alignment": [
     {{
-      "driver_id": "شناسه پیشران مرتبط (باید دقیقاً یکی از شناسه‌ها مانند 'DRV_ENERGY_01' از لیست بخش ۱ باشد. به هیچ عنوان عنوان یا موضوع پروپوزال را در این فیلد قرار ندهید)",
-      "driver_title": "عنوان پیشران (باید دقیقاً عنوان مرتبط از لیست بخش ۱ باشد)",
+      "driver_id": "شناسه دقیق پیشران (مانند DRV_ENERGY_01)",
+      "driver_title": "عنوان پیشران",
       "direct_alignment_score": 85,
-      "reasoning_quote": "الزامی: کپی دقیق و کلمه‌به‌کلمهِ یک جمله از بانک شواهد (بخش ۳). هرگز خالی نگذارید."
+      "reasoning_quote": "کپی دقیق جمله از بانک شواهد"
     }}
   ],
   "weighted_overall_score": 82.5,
   "trl_analysis": {{
     "claimed_trl": "TRL ادعا شده",
     "assessed_trl": "TRL ارزیابی‌شده",
-    "gap_analysis": "نیازمندی‌ها برای TRL بالاتر"
+    "gap_analysis": "تحلیل شکاف"
   }},
   "technical_critique": {{
-    "strengths": ["نقطه قوت ۱", "نقطه قوت ۲"],
-    "weaknesses_and_risks": ["ریسک یا نقطه ضعف ۱", "ریسک ۲"],
-    "red_flags": ["موارد مبهم"]
+    "strengths": ["نقطه قوت"],
+    "weaknesses_and_risks": ["ریسک"],
+    "red_flags": ["نکته مبهم"]
   }},
-  "actionable_feedback_for_proposer": "پیشنهاد مشخص برای اصلاح",
-  "final_recommendation": "یکی از موارد: [تایید اولیه / نیازمند اصلاح و بازنگری / رد اولیه]"
+  "actionable_feedback_for_proposer": "بازخورد",
+  "final_recommendation": "تایید اولیه"
 }}
 """
-        return system_prompt
 
-    def analyze(self, proposal_text: str, previous_feedback: str = None, **kwargs) -> Dict[str, Any]:
+        def analyze(self, proposal_text: str, previous_feedback: str = None, **kwargs) -> Dict[str, Any]:
         """
-        اجرای چرخه تحلیل پروپوزال (نقطه اتصال به موتور ارکستراتور)
-        * مجهز به سپر دفاعی **kwargs جهت تاب‌آوری در برابر تغییر آرگومان‌ها
+        اجرای چرخه تحلیل پروپوزال با قابلیت بازتلاش هوشمند در صورت قطعی شبکه یا خطای ۵۰۲
         """
         if not proposal_text or len(proposal_text.strip()) < 50:
-            return {"error": "متن پروپوزال ورودی بسیار کوتاه یا نامعتبر است."}
+            return {"error": "متن پروپوزال ورودی بسیار کوتاه است."}
 
-        # گام اول: تولید بانک شواهد بر اساس موتور RAG معنایی
         evidence_bank = self._extract_evidence_sentences(proposal_text)
-        
-        # گام دوم: ساخت پرامپت استراتژیک به همراه تزریق بازخورد در صورت وجود
         system_prompt = self._build_system_prompt(evidence_bank, previous_feedback)
-        user_message = f"لطفاً پروپوزال زیر را با دقت بررسی و طبق دستورالعمل دقیقاً در قالب JSON خروجی دهید:\n\n{proposal_text}"
+        user_message = f"پروپوزال زیر را ارزیابی و فقط به صورت JSON پاسخ دهید:\n\n{proposal_text}"
 
-        try:
-            if ollama is None:
-                raise ImportError("کتابخانه ollama نصب نیست.")
+        max_network_retries = 3
+        for attempt in range(1, max_network_retries + 1):
+            try:
+                if ollama is None:
+                    raise ImportError("کتابخانه ollama نصب نیست.")
 
-            response = ollama.chat(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_message}
-                ],
-                format="json",
-                options={
-                    "temperature": 0.0, # قفل شدن دما روی صفر مطلق برای رفتارهای کاملاً تحلیلی و تکرارپذیر
-                    "top_p": 0.9
+                # ارسال درخواست به Ollama
+                response = ollama.chat(
+                    model=self.model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message}
+                    ],
+                    format="json",
+                    options={"temperature": 0.0, "top_p": 0.9}
+                )
+
+                raw_output = response['message']['content'].strip()
+                return self._clean_and_parse_json(raw_output)
+
+            except Exception as e:
+                error_str = str(e)
+                # اگر خطای شبکه یا 502 باشد، چند ثانیه صبر کرده و دوباره تلاش می‌کند
+                if "502" in error_str or "connection" in error_str.lower():
+                    if attempt < max_network_retries:
+                        time.sleep(2)  # ۲ ثانیه مکث برای بازیابی سرور
+                        continue
+                
+                return {
+                    "parsing_error": True,
+                    "message": f"خطای ارتباط با Ollama (تلاش {attempt}): {error_str}"
                 }
-            )
-
-            raw_output = response['message']['content'].strip()
-            return self._clean_and_parse_json(raw_output)
-
-        except Exception as e:
-            return {
-                "parsing_error": True,
-                "error_message": str(e)
-            }
 
     def _clean_and_parse_json(self, raw_text: str) -> Dict[str, Any]:
-        """
-        استخراج ساختاریافته خروجی (ایزوله کردن JSON از متون اضافه)
-        """
+        """استخراج و پاک‌سازی هوشمند ساختار JSON از متن خام"""
+        if not raw_text:
+            return {"parsing_error": True, "message": "پاسخ دریافت شده خالی است."}
+
+        # ۱. حذف علامت‌های بلوک کد مارک‌داون
+        cleaned = re.sub(r'```(?:json)?', '', raw_text, flags=re.IGNORECASE).strip()
+        cleaned = cleaned.rstrip('`').strip()
+
+        # ۲. استخراج دقیق محدوده آکولادها
+        start_idx = cleaned.find('{')
+        end_idx = cleaned.rfind('}')
+
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            json_str = cleaned[start_idx:end_idx + 1]
+            try:
+                return json.loads(json_str)
+            except json.JSONDecodeError:
+                # حذف کاماهای اضافه قبل از بستن آکولاد یا کروشه
+                fixed_str = re.sub(r',\s*([}\]])', r'\1', json_str)
+                try:
+                    return json.loads(fixed_str)
+                except json.JSONDecodeError:
+                    pass
+
         try:
-            match = re.search(r'\{.*\}', raw_text, re.DOTALL)
-            if match:
-                clean_json = match.group(0)
-                return json.loads(clean_json)
-            else:
-                return json.loads(raw_text)
+            return json.loads(cleaned)
         except json.JSONDecodeError as e:
             return {
                 "parsing_error": True,
-                "message": f"خطا در پارس خروجی مدل: {str(e)}",
+                "message": f"خطا در پارس JSON: {str(e)}",
                 "raw_response": raw_text
             }
+
+
+AnalyzerAgent = ProposalAnalyzerAgent
