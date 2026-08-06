@@ -1,0 +1,11 @@
+{
+  "active_anti_skills": [
+    {
+      "error_id": "ERR_EMPTY_QUOTE_DRV_01",
+      "description": "تولید رشته خالی یا صرفاً کاراکتر اسپیس برای فیلد reasoning_quote",
+      "weight": 0.85,
+      "last_occurred": "2026-07-14 15:30:00",
+      "context_snippet": "مدل در بررسی پیشران DRV_ENERGY_01 فیلد را به صورت '« »' رها کرده بود."
+    }
+  ]
+}

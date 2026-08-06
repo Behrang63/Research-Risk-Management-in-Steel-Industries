@@ -1,0 +1,19 @@
+pajoheshyar-agent-v1/
+│
+├── config/
+│   └── drivers.json          # فهرست پیشران‌های استراتژیک فولاد (با وزن و کلمات کلیدی)
+│
+├── skills/
+│   ├── SKILL_TERMINOLOGY.md   # مفاهیم تخصصی متالورژی و فولادسازی
+│   ├── SKILL_TRL_EVAL.md      # معیارها و فرمول‌های سنجش TRL
+│   └── SKILL_FEEDBACK.md     # اصول ارائه بازخورد سازنده به پژوهشگر
+│
+├── agents/
+│   ├── analyzer_agent.py      # عامل اصلی تحلیل‌گر (Llama 3)
+│   └── checker_agent.py       # عامل هوشمند ممیزی و کنترل کیفیت (Checker)
+│
+├── prompts/
+│   ├── system_prompt.txt      # پرامپت اصلی سیستم
+│   └── checker_prompt.txt     # پرامپت نقادانه برای Checker
+│
+└── main.py                    # خط لوله اصلی اجرا (Pipeline)
